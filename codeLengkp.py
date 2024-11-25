@@ -1,0 +1,261 @@
+import tkinter as tk
+import random
+
+
+class GameObject(object):
+    def __init__(self, canvas, item):
+        self.canvas = canvas
+        self.item = item
+
+    def get_position(self):
+        return self.canvas.coords(self.item)
+
+    def move(self, x, y):
+        self.canvas.move(self.item, x, y)
+
+    def delete(self):
+        self.canvas.delete(self.item)
+
+
+class Ball(GameObject):
+    def __init__(self, canvas, x, y):
+        self.radius = 8
+        self.direction = [1, -1]
+        self.speed = 6
+        item = canvas.create_oval(x-self.radius, y-self.radius,
+                                  x+self.radius, y+self.radius,
+                                  fill='#00ffff',
+                                  outline='#ffffff',
+                                  width=2)
+        super(Ball, self).__init__(canvas, item)
+
+    def update(self):
+        coords = self.get_position()
+        width = self.canvas.winfo_width()
+        if coords[0] <= 0 or coords[2] >= width:
+            self.direction[0] *= -1
+        if coords[1] <= 0:
+            self.direction[1] *= -1
+        x = self.direction[0] * self.speed
+        y = self.direction[1] * self.speed
+        self.move(x, y)
+
+    def collide(self, game_objects):
+        coords = self.get_position()
+        x = (coords[0] + coords[2]) * 0.5
+        if len(game_objects) > 1:
+            self.direction[1] *= -1
+        elif len(game_objects) == 1:
+            game_object = game_objects[0]
+            coords = game_object.get_position()
+            if x > coords[2]:
+                self.direction[0] = 1
+            elif x < coords[0]:
+                self.direction[0] = -1
+            else:
+                self.direction[1] *= -1
+
+        for game_object in game_objects:
+            if isinstance(game_object, Brick):
+                game_object.hit()
+
+
+class Paddle(GameObject):
+    def __init__(self, canvas, x, y):
+        self.width = 100
+        self.height = 8
+        self.ball = None
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill='#ff00ff',
+                                       outline='#ffffff',
+                                       width=2)
+        super(Paddle, self).__init__(canvas, item)
+
+    def set_ball(self, ball):
+        self.ball = ball
+
+    def move(self, offset):
+        coords = self.get_position()
+        width = self.canvas.winfo_width()
+        if coords[0] + offset >= 0 and coords[2] + offset <= width:
+            super(Paddle, self).move(offset, 0)
+            if self.ball is not None:
+                self.ball.move(offset, 0)
+
+
+class Brick(GameObject):
+    COLORS = {
+        1: '#ff0080',
+        2: '#00ff00',
+        3: '#ff00ff',
+        4: '#00ffff',
+        5: '#ffff00'
+    }
+    
+    SCORES = {
+        1: 50,
+        2: 100,
+        3: 150,
+        4: 200,
+        5: 300
+    }
+
+    def __init__(self, canvas, x, y, hits):
+        self.width = 70
+        self.height = 25
+        self.hits = hits
+        color = Brick.COLORS[hits]
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill=color,
+                                       outline='#ffffff',
+                                       width=2,
+                                       tags='brick')
+        super(Brick, self).__init__(canvas, item)
+
+    def hit(self):
+        self.hits -= 1
+        if self.hits == 0:
+            self.delete()
+        else:
+            self.canvas.itemconfig(self.item,
+                                   fill=Brick.COLORS[self.hits])
+
+
+class Game(tk.Frame):
+    def __init__(self, master):
+        super(Game, self).__init__(master)
+        self.lives = 5
+        self.width = 800
+        self.height = 600
+        self.score = 0
+        self.level = 1
+        self.high_score = 0
+        
+        self.canvas = tk.Canvas(self, bg='#000000',
+                                width=self.width,
+                                height=self.height)
+        self.canvas.pack()
+        self.pack()
+
+        self.items = {}
+        self.ball = None
+        self.paddle = Paddle(self.canvas, self.width/2, 550)
+        self.items[self.paddle.item] = self.paddle
+
+        self.setup_level()
+        self.hud = None
+        self.setup_game()
+        self.canvas.focus_set()
+        
+        self.canvas.bind('<Left>', lambda _: self.paddle.move(-12))
+        self.canvas.bind('<Right>', lambda _: self.paddle.move(12))
+        self.canvas.bind('<a>', lambda _: self.paddle.move(-12))
+        self.canvas.bind('<d>', lambda _: self.paddle.move(12))
+        self.canvas.bind('<space>', lambda _: self.start_game())
+
+    def setup_level(self):
+        for item in self.canvas.find_withtag('brick'):
+            self.canvas.delete(item)
+        
+        brick_width = 70
+        brick_height = 25
+        spacing = 5
+        
+        for row in range(self.level + 2):
+            hits = min(self.level, 5)
+            y = 50 + (brick_height + spacing) * row
+            for col in range(10):
+                x = (brick_width + spacing) * col + brick_width/2 + 50
+                if row % 2 == 0:
+                    x += brick_width/2
+                self.add_brick(x, y, hits)
+
+    def draw_text(self, x, y, text, size='40'):
+        font = ('Helvetica', size, 'bold')
+        return self.canvas.create_text(x, y, text=text,
+                                     font=font,
+                                     fill='#00ffff')
+
+    def update_lives_text(self):
+        lives_text = '❤️ ' * self.lives
+        score_text = f'SCORE: {self.score}'
+        level_text = f'LEVEL: {self.level}'
+        high_score_text = f'HI-SCORE: {self.high_score}'
+        
+        if self.hud is None:
+            self.hud = self.draw_text(100, 20, lives_text, 20)
+            self.score_display = self.draw_text(300, 20, score_text, 20)
+            self.level_display = self.draw_text(500, 20, level_text, 20)
+            self.high_score_display = self.draw_text(700, 20, high_score_text, 20)
+        else:
+            self.canvas.itemconfig(self.hud, text=lives_text)
+            self.canvas.itemconfig(self.score_display, text=score_text)
+            self.canvas.itemconfig(self.level_display, text=level_text)
+            self.canvas.itemconfig(self.high_score_display, text=high_score_text)
+
+    def setup_next_level(self):
+        self.ball.speed += 1.5
+        self.setup_level()
+        self.setup_game()
+
+    def setup_game(self):
+           self.add_ball()
+           self.update_lives_text()
+           self.text = self.draw_text(300, 200,
+                                      'Press Space to start')
+           self.canvas.bind('<space>', lambda _: self.start_game())
+
+    def add_ball(self):
+        if self.ball is not None:
+            self.ball.delete()
+        paddle_coords = self.paddle.get_position()
+        x = (paddle_coords[0] + paddle_coords[2]) * 0.5
+        self.ball = Ball(self.canvas, x, 310)
+        self.paddle.set_ball(self.ball)
+
+    def add_brick(self, x, y, hits):
+        brick = Brick(self.canvas, x, y, hits)
+        self.items[brick.item] = brick
+
+    def start_game(self):
+        self.canvas.unbind('<space>')
+        self.canvas.delete(self.text)
+        self.paddle.ball = None
+        self.game_loop()
+
+    def game_loop(self):
+        self.check_collisions()
+        num_bricks = len(self.canvas.find_withtag('brick'))
+        if num_bricks == 0: 
+            self.ball.speed = None
+            self.draw_text(300, 200, 'You win! You the Breaker of Bricks.')
+        elif self.ball.get_position()[3] >= self.height: 
+            self.ball.speed = None
+            self.lives -= 1
+            if self.lives < 0:
+                self.draw_text(300, 200, 'You Lose! Game Over!')
+            else:
+                self.after(1000, self.setup_game)
+        else:
+            self.ball.update()
+            self.after(50, self.game_loop)
+
+    def check_collisions(self):
+        ball_coords = self.ball.get_position()
+        items = self.canvas.find_overlapping(*ball_coords)
+        objects = [self.items[x] for x in items if x in self.items]
+        self.ball.collide(objects)
+
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.title('🌟 Neon Space Breaker 🌟')
+    game = Game(root)
+    game.mainloop()
